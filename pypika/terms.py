@@ -3,9 +3,10 @@ import re
 import uuid
 from datetime import date
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Iterable, Iterator, List, Optional, Sequence, Set, Type, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator, List, Optional, Sequence, Set, Type, TypeVar, Union, cast
 
 from pypika.enums import Arithmetic, Boolean, Comparator, Dialects, Equality, JSONOperators, Matching, Order
+from pypika.queries import Table
 from pypika.utils import (
     CaseException,
     FunctionException,
@@ -17,7 +18,7 @@ from pypika.utils import (
 )
 
 if TYPE_CHECKING:
-    from pypika.queries import QueryBuilder, Selectable, Table
+    from pypika.queries import QueryBuilder, Selectable
 
 
 __author__ = "Timothy Heys"
@@ -28,9 +29,8 @@ NodeT = TypeVar("NodeT", bound="Node")
 
 
 class Node:
-    is_aggregate = None
 
-    def nodes_(self) -> Iterator[NodeT]:
+    def nodes_(self) -> Iterator["Node"]:
         yield self
 
     def find_(self, type: Type[NodeT]) -> List[NodeT]:
@@ -38,18 +38,21 @@ class Node:
 
 
 class Term(Node):
-    is_aggregate = False
 
     def __init__(self, alias: Optional[str] = None) -> None:
         self.alias = alias
 
     @builder
-    def as_(self, alias: str) -> "Term":
+    def as_(self, alias: str) -> None:
         self.alias = alias
 
     @property
+    def is_aggregate(self) -> Optional[bool]:
+        return None
+
+    @property
     def tables_(self) -> Set["Table"]:
-        from pypika import Table
+        from pypika.queries import Table
 
         return set(self.find_(Table))
 
@@ -58,8 +61,8 @@ class Term(Node):
 
     @staticmethod
     def wrap_constant(
-        val, wrapper_cls: Optional[Type["Term"]] = None
-    ) -> Union[ValueError, NodeT, "LiteralValue", "Array", "Tuple", "ValueWrapper"]:
+        val: Any, wrapper_cls: Optional[Type["Term"]] = None
+    ) -> Union["Term"]:
         """
         Used for wrapping raw inputs such as numbers in Criterions and Operator.
 
@@ -75,7 +78,7 @@ class Term(Node):
 
         """
 
-        if isinstance(val, Node):
+        if isinstance(val, Term):
             return val
         if val is None:
             return NullValue()
@@ -90,7 +93,8 @@ class Term(Node):
 
     @staticmethod
     def wrap_json(
-        val: Union["Term", "QueryBuilder", "Interval", None, str, int, bool], wrapper_cls=None
+        val: Union["Term", "QueryBuilder", "Interval", None, str, int, bool],
+        wrapper_cls : Optional[Callable[[Any], Union["Term", "QueryBuilder", "Interval", "NullValue", "ValueWrapper", "JSON"]]] = None
     ) -> Union["Term", "QueryBuilder", "Interval", "NullValue", "ValueWrapper", "JSON"]:
         from .queries import QueryBuilder
 
@@ -118,7 +122,7 @@ class Term(Node):
         """
         return self
 
-    def eq(self, other: Any) -> "BasicCriterion":
+    def eq(self, other: Any) -> Any:
         return self == other
 
     def isnull(self) -> "NullCriterion":
@@ -133,19 +137,19 @@ class Term(Node):
     def bitwiseand(self, value: int) -> "BitwiseAndCriterion":
         return BitwiseAndCriterion(self, self.wrap_constant(value))
 
-    def gt(self, other: Any) -> "BasicCriterion":
+    def gt(self, other: Any) -> Any:
         return self > other
 
-    def gte(self, other: Any) -> "BasicCriterion":
+    def gte(self, other: Any) -> Any:
         return self >= other
 
-    def lt(self, other: Any) -> "BasicCriterion":
+    def lt(self, other: Any) -> Any:
         return self < other
 
-    def lte(self, other: Any) -> "BasicCriterion":
+    def lte(self, other: Any) -> Any:
         return self <= other
 
-    def ne(self, other: Any) -> "BasicCriterion":
+    def ne(self, other: Any) -> Any:
         return self != other
 
     def glob(self, expr: str) -> "BasicCriterion":
@@ -184,13 +188,13 @@ class Term(Node):
     def all_(self) -> "All":
         return All(self)
 
-    def isin(self, arg: Union[list, tuple, set, "Term"]) -> "ContainsCriterion":
+    def isin(self, arg: Union[list[Any], tuple[Any], set[Any], "Term"]) -> "ContainsCriterion":
         if isinstance(arg, (list, tuple, set)):
             return ContainsCriterion(self, Tuple(*[self.wrap_constant(value) for value in arg]))
         return ContainsCriterion(self, arg)
 
-    def notin(self, arg: Union[list, tuple, set, "Term"]) -> "ContainsCriterion":
-        return self.isin(arg).negate()
+    def notin(self, arg: Union[list[Any], tuple[Any], set[Any], "Term"]) -> "ContainsCriterion":
+        return cast("ContainsCriterion", self.isin(arg).negate())
 
     def bin_regex(self, pattern: str) -> "BasicCriterion":
         return BasicCriterion(Matching.bin_regex, self, self.wrap_constant(pattern))
@@ -199,10 +203,10 @@ class Term(Node):
         return Not(self)
 
     def lshift(self, other: Any) -> "ArithmeticExpression":
-        return self << other
+        return self << other # type: ignore
 
     def rshift(self, other: Any) -> "ArithmeticExpression":
-        return self >> other
+        return self >> other # type: ignore
 
     def __invert__(self) -> "Not":
         return Not(self)
@@ -289,11 +293,14 @@ class Term(Node):
 
 
 class Parameter(Term):
-    is_aggregate = None
 
     def __init__(self, placeholder: Union[str, int]) -> None:
         super().__init__()
         self.placeholder = placeholder
+
+    @property
+    def is_aggregate(self) -> Optional[bool]:
+        return None
 
     def get_sql(self, **kwargs: Any) -> str:
         return str(self.placeholder)
@@ -354,7 +361,6 @@ class Negative(Term):
 
 
 class ValueWrapper(Term):
-    is_aggregate = None
 
     def __init__(self, value: Any, alias: Optional[str] = None) -> None:
         super().__init__(alias)
@@ -363,8 +369,12 @@ class ValueWrapper(Term):
     def get_value_sql(self, **kwargs: Any) -> str:
         return self.get_formatted_value(self.value, **kwargs)
 
+    @property
+    def is_aggregate(self) -> Optional[bool]:
+        return None
+
     @classmethod
-    def get_formatted_value(cls, value: Any, **kwargs):
+    def get_formatted_value(cls, value: Any, **kwargs) -> str:
         quote_char = kwargs.get("secondary_quote_char") or ""
 
         # FIXME escape values
@@ -406,7 +416,7 @@ class JSON(Term):
             return self._get_str_sql(value, **kwargs)
         return str(value)
 
-    def _get_dict_sql(self, value: dict, **kwargs: Any) -> str:
+    def _get_dict_sql(self, value: dict[Any, Any], **kwargs: Any) -> str:
         pairs = [
             "{key}:{value}".format(
                 key=self._recursive_get_sql(k, **kwargs),
@@ -416,7 +426,7 @@ class JSON(Term):
         ]
         return "".join(["{", ",".join(pairs), "}"])
 
-    def _get_list_sql(self, value: list, **kwargs: Any) -> str:
+    def _get_list_sql(self, value: list[Any], **kwargs: Any) -> str:
         pairs = [self._recursive_get_sql(v, **kwargs) for v in value]
         return "".join(["[", ",".join(pairs), "]"])
 
@@ -449,7 +459,7 @@ class JSON(Term):
     def contained_by(self, other: Any) -> "BasicCriterion":
         return BasicCriterion(JSONOperators.CONTAINED_BY, self, self.wrap_json(other))
 
-    def has_keys(self, other: Iterable) -> "BasicCriterion":
+    def has_keys(self, other: Iterable[Term]) -> "BasicCriterion":
         return BasicCriterion(JSONOperators.HAS_KEYS, self, Array(*other))
 
     def has_any_keys(self, other: Iterable) -> "BasicCriterion":
@@ -517,8 +527,11 @@ class Criterion(Term):
 
 
 class EmptyCriterion(Criterion):
-    is_aggregate = None
     tables_ = set()
+
+    @property
+    def is_aggregate(self) -> Optional[bool]:
+        return None
 
     def fields_(self) -> Set["Field"]:
         return set()
@@ -821,7 +834,7 @@ class ContainsCriterion(Criterion):
         return format_alias_sql(sql, self.alias, **kwargs)
 
     @builder
-    def negate(self) -> "ContainsCriterion":
+    def negate(self) -> None:
         self._is_negated = True
 
 
@@ -862,7 +875,7 @@ class RangeCriterion(Criterion):
 
 class BetweenCriterion(RangeCriterion):
     @builder
-    def replace_table(self, current_table: Optional["Table"], new_table: Optional["Table"]) -> "BetweenCriterion":
+    def replace_table(self, current_table: Optional["Table"], new_table: Optional["Table"]) -> None:
         """
         Replaces all occurrences of the specified table with the new table. Useful when reusing fields across queries.
 
@@ -907,7 +920,7 @@ class BitwiseAndCriterion(Criterion):
         yield from self.value.nodes_()
 
     @builder
-    def replace_table(self, current_table: Optional["Table"], new_table: Optional["Table"]) -> "BitwiseAndCriterion":
+    def replace_table(self, current_table: Optional["Table"], new_table: Optional["Table"]) -> None:
         """
         Replaces all occurrences of the specified table with the new table. Useful when reusing fields across queries.
 
@@ -1102,8 +1115,8 @@ class ArithmeticExpression(Term):
 class Case(Criterion):
     def __init__(self, alias: Optional[str] = None) -> None:
         super().__init__(alias=alias)
-        self._cases = []
-        self._else = None
+        self._cases : list[tuple[Criterion, Term]] = []
+        self._else : Optional[Term] = None
 
     def nodes_(self) -> Iterator[NodeT]:
         yield self
@@ -1124,11 +1137,11 @@ class Case(Criterion):
         )
 
     @builder
-    def when(self, criterion: Any, term: Any) -> "Case":
+    def when(self, criterion: Criterion, term: Term) -> None:
         self._cases.append((criterion, self.wrap_constant(term)))
 
     @builder
-    def replace_table(self, current_table: Optional["Table"], new_table: Optional["Table"]) -> "Case":
+    def replace_table(self, current_table: Optional["Table"], new_table: Optional["Table"]) -> None:
         """
         Replaces all occurrences of the specified table with the new table. Useful when reusing fields across queries.
 
@@ -1149,7 +1162,7 @@ class Case(Criterion):
         self._else = self._else.replace_table(current_table, new_table) if self._else else None
 
     @builder
-    def else_(self, term: Any) -> "Case":
+    def else_(self, term: Term) -> "Case":
         self._else = self.wrap_constant(term)
         return self
 
@@ -1339,7 +1352,6 @@ class Function(Criterion):
 
 
 class AggregateFunction(Function):
-    is_aggregate = True
 
     def __init__(self, name, *args, **kwargs):
         super(AggregateFunction, self).__init__(name, *args, **kwargs)
@@ -1365,9 +1377,12 @@ class AggregateFunction(Function):
 
         return sql
 
+    @property
+    def is_aggregate(self) -> Optional[bool]:
+        return True
+
 
 class AnalyticFunction(AggregateFunction):
-    is_aggregate = False
     is_analytic = True
 
     def __init__(self, name: str, *args: Any, **kwargs: Any) -> None:
@@ -1424,6 +1439,10 @@ class AnalyticFunction(AggregateFunction):
             sql += " OVER({partition_sql})".format(partition_sql=partition_sql)
 
         return sql
+
+    @property
+    def is_aggregate(self) -> Optional[bool]:
+        return False
 
 
 EdgeT = TypeVar("EdgeT", bound="WindowFrameAnalyticFunction.Edge")
@@ -1638,8 +1657,6 @@ class AtTimezone(Term):
         AT TIME ZONE INTERVAL '-06:00'
     """
 
-    is_aggregate = None
-
     def __init__(self, field, zone, interval=False, alias=None):
         super().__init__(alias)
         self.field = Field(field) if not isinstance(field, Field) else field
@@ -1653,3 +1670,7 @@ class AtTimezone(Term):
             zone=self.zone,
         )
         return format_alias_sql(sql, self.alias, **kwargs)
+
+    @property
+    def is_aggregate(self) -> Optional[bool]:
+        return None

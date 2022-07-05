@@ -1,6 +1,6 @@
 import itertools
 from copy import copy
-from typing import Any, Optional, Union, Tuple as TypedTuple
+from typing import Any, Optional, Union, Tuple as TypedTuple, cast
 
 from pypika.enums import Dialects
 from pypika.queries import (
@@ -680,7 +680,7 @@ class MSSQLQueryBuilder(QueryBuilder):
         self._top_percent: bool = False
 
     @builder
-    def top(self, value: Union[str, int], percent: bool = False, with_ties: bool = False) -> "MSSQLQueryBuilder":
+    def top(self, value: Union[str, int], percent: bool = False, with_ties: bool = False) -> None:
         """
         Implements support for simple TOP clauses.
         https://docs.microsoft.com/en-us/sql/t-sql/queries/top-transact-sql?view=sql-server-2017
@@ -696,7 +696,7 @@ class MSSQLQueryBuilder(QueryBuilder):
         self._top_with_ties: bool = with_ties
 
     @builder
-    def fetch_next(self, limit: int) -> "MSSQLQueryBuilder":
+    def fetch_next(self, limit: int) -> None:
         # Overridden to provide a more domain-specific API for T-SQL users
         self._limit = limit
 
@@ -755,27 +755,27 @@ class ClickHouseQuery(Query):
 
     @classmethod
     def drop_database(self, database: Union[Database, str]) -> "ClickHouseDropQueryBuilder":
-        return ClickHouseDropQueryBuilder().drop_database(database)
+        return cast("ClickHouseDropQueryBuilder", ClickHouseDropQueryBuilder().drop_database(database))
 
     @classmethod
     def drop_table(self, table: Union[Table, str]) -> "ClickHouseDropQueryBuilder":
-        return ClickHouseDropQueryBuilder().drop_table(table)
+        return cast("ClickHouseDropQueryBuilder", ClickHouseDropQueryBuilder().drop_table(table))
 
     @classmethod
     def drop_dictionary(self, dictionary: str) -> "ClickHouseDropQueryBuilder":
-        return ClickHouseDropQueryBuilder().drop_dictionary(dictionary)
+        return cast("ClickHouseDropQueryBuilder", ClickHouseDropQueryBuilder().drop_dictionary(dictionary))
 
     @classmethod
     def drop_quota(self, quota: str) -> "ClickHouseDropQueryBuilder":
-        return ClickHouseDropQueryBuilder().drop_quota(quota)
+        return cast("ClickHouseDropQueryBuilder", ClickHouseDropQueryBuilder().drop_quota(quota))
 
     @classmethod
     def drop_user(self, user: str) -> "ClickHouseDropQueryBuilder":
-        return ClickHouseDropQueryBuilder().drop_user(user)
+        return cast("ClickHouseDropQueryBuilder", ClickHouseDropQueryBuilder().drop_user(user))
 
     @classmethod
     def drop_view(self, view: str) -> "ClickHouseDropQueryBuilder":
-        return ClickHouseDropQueryBuilder().drop_view(view)
+        return cast("ClickHouseDropQueryBuilder", ClickHouseDropQueryBuilder().drop_view(view))
 
 
 class ClickHouseQueryBuilder(QueryBuilder):
@@ -786,6 +786,7 @@ class ClickHouseQueryBuilder(QueryBuilder):
         return 'ALTER TABLE'
 
     def _update_sql(self, **kwargs: Any) -> str:
+        assert self._update_table
         return "ALTER TABLE {table}".format(table=self._update_table.get_sql(**kwargs))
 
     def _from_sql(self, with_namespace: bool = False, **kwargs: Any) -> str:
@@ -808,20 +809,24 @@ class ClickHouseQueryBuilder(QueryBuilder):
 class ClickHouseDropQueryBuilder(DropQueryBuilder):
     QUERY_CLS = ClickHouseQuery
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(dialect=Dialects.CLICKHOUSE)
-        self._cluster_name = None
+        self._cluster_name : Optional[str] = None
 
     @builder
-    def drop_dictionary(self, dictionary: str) -> "ClickHouseDropQueryBuilder":
+    def drop_database(self, database: Union[Database, str]) -> None:
+        super().drop_database(database)
+
+    @builder
+    def drop_dictionary(self, dictionary: str) -> None:
         super()._set_target('DICTIONARY', dictionary)
 
     @builder
-    def drop_quota(self, quota: str) -> "ClickHouseDropQueryBuilder":
+    def drop_quota(self, quota: str) -> None:
         super()._set_target('QUOTA', quota)
 
     @builder
-    def on_cluster(self, cluster: str) -> "ClickHouseDropQueryBuilder":
+    def on_cluster(self, cluster: str) -> None:
         if self._cluster_name:
             raise AttributeError("'DropQuery' object already has attribute cluster_name")
         self._cluster_name = cluster
@@ -860,7 +865,7 @@ class SQLLiteQueryBuilder(QueryBuilder):
         self._insert_or_replace = False
 
     @builder
-    def insert_or_replace(self, *terms: Any) -> "SQLLiteQueryBuilder":
+    def insert_or_replace(self, *terms: Any) -> None:
         self._apply_terms(*terms)
         self._replace = True
         self._insert_or_replace = True

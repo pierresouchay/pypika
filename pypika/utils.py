@@ -1,4 +1,4 @@
-from typing import Any, Callable, List, Optional, Type
+from typing import Any, Callable, List, Optional, Type, TypeVar, cast
 
 __author__ = "Timothy Heys"
 __email__ = "theys@kayak.com"
@@ -35,8 +35,9 @@ class DialectNotSupported(Exception):
 class FunctionException(Exception):
     pass
 
+T = TypeVar("T")
 
-def builder(func: Callable) -> Callable:
+def builder(func: Callable[[T, Any], Any]) -> Callable[[Type[T], Any], Type[T]]:
     """
     Decorator for wrapper "builder" functions.  These are functions on the Query class or other classes used for
     building queries which mutate the query and return self.  To make the build functions immutable, this decorator is
@@ -45,21 +46,21 @@ def builder(func: Callable) -> Callable:
     """
     import copy
 
-    def _copy(self, *args, **kwargs):
+    def _copy(self, *args, **kwargs) -> T: # type: ignore
         self_copy = copy.copy(self) if getattr(self, "immutable", True) else self
-        result = func(self_copy, *args, **kwargs)
+        result = func(self_copy, *args, **kwargs) # type: ignore
 
         # Return self if the inner function returns None.  This way the inner function can return something
         # different (for example when creating joins, a different builder is returned).
         if result is None:
-            return self_copy
+            return self_copy # type: ignore
 
-        return result
+        return result # type: ignore
 
-    return _copy
+    return _copy # type: ignore
 
 
-def ignore_copy(func: Callable) -> Callable:
+def ignore_copy(func: Callable[[T, str], T]) -> Callable[[T, str], T]:
     """
     Decorator for wrapping the __getattr__ function for classes that are copied via deepcopy.  This prevents infinite
     recursion caused by deepcopy looking for magic functions in the class. Any class implementing __getattr__ that is
@@ -69,7 +70,7 @@ def ignore_copy(func: Callable) -> Callable:
     model type class (stored in the Query instance) is copied.
     """
 
-    def _getattr(self, name):
+    def _getattr(self: T, name: str) -> T:
         if name in [
             "__copy__",
             "__deepcopy__",
@@ -118,8 +119,8 @@ def format_alias_sql(
     )
 
 
-def validate(*args: Any, exc: Optional[Exception] = None, type: Optional[Type] = None) -> None:
+def validate(*args: Any, exc: Optional[Exception] = None, type: Optional[Type[Any]] = None) -> None:
     if type is not None:
         for arg in args:
             if not isinstance(arg, type):
-                raise exc
+                raise exc # type: ignore

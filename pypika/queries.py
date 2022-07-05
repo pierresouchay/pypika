@@ -692,7 +692,7 @@ class QueryBuilder(Selectable, Term):
 
         self._from = []
         self._insert_table = None
-        self._update_table = None
+        self._update_table : Optional[Table] = None
         self._delete_from = False
         self._replace = False
 
@@ -2064,21 +2064,21 @@ class DropQueryBuilder:
         kwargs.setdefault("dialect", self.dialect)
 
     @builder
-    def drop_database(self, database: Union[Database, str]) -> "DropQueryBuilder":
+    def drop_database(self, database: Union[Database, str]) -> None:
         target = database if isinstance(database, Database) else Database(database)
         self._set_target('DATABASE', target)
 
     @builder
-    def drop_table(self, table: Union[Table, str]) -> "DropQueryBuilder":
+    def drop_table(self, table: Union[Table, str]) -> None:
         target = table if isinstance(table, Table) else Table(table)
         self._set_target('TABLE', target)
 
     @builder
-    def drop_user(self, user: str) -> "DropQueryBuilder":
+    def drop_user(self, user: str) -> None:
         self._set_target('USER', user)
 
     @builder
-    def drop_view(self, view: str) -> "DropQueryBuilder":
+    def drop_view(self, view: str) -> None:
         self._set_target('VIEW', view)
 
     @builder
